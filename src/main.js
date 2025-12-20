@@ -726,9 +726,8 @@ try {
         launchContext: {
             launcher: firefox,
             launchOptions: await camoufoxLaunchOptions({
-                // Use 'virtual' headless mode on Linux (Xvfb) for better stealth
-                // This runs the browser with a real display context but no physical screen
-                headless: 'virtual',
+                // Headless mode - must be boolean for Crawlee/Playwright
+                headless: true,
 
                 // Proxy configuration
                 proxy: proxyUrl,
@@ -744,6 +743,9 @@ try {
 
                 // Disable Cross-Origin-Opener-Policy for Turnstile checkbox clicking
                 disable_coop: true,
+
+                // Suppress the disable_coop warning
+                i_know_what_im_doing: true,
 
                 // Block WebRTC to prevent IP leaks
                 block_webrtc: true,
