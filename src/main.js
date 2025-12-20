@@ -128,8 +128,9 @@ function stripHtml(html) {
 /**
  * Fetch complete job description from detail page using got-scraping
  * This is faster than using Playwright for each detail page
+ * Uses cookies from Camoufox session to maintain Cloudflare bypass
  */
-async function fetchFullDescription(jobUrl, cookies = '') {
+async function fetchFullDescription(jobUrl, cookies = '', userAgent = '') {
     try {
         const response = await gotScraping({
             url: jobUrl,
@@ -137,11 +138,20 @@ async function fetchFullDescription(jobUrl, cookies = '') {
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.9',
                 'Cookie': cookies,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+                'User-Agent': userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'same-origin',
             },
             timeout: { request: 15000 },
-            retry: { limit: 2 },
+            retry: { limit: 1 },
         });
+
+        // Check for Cloudflare block
+        if (response.statusCode === 403 || response.statusCode === 503) {
+            log.debug(`Cloudflare block detected on detail page (${response.statusCode}): ${jobUrl}`);
+            return { blocked: true }; // Signal that session needs refresh
+        }
 
         if (response.statusCode !== 200) {
             log.debug(`Detail page returned status ${response.statusCode}: ${jobUrl}`);
@@ -149,6 +159,13 @@ async function fetchFullDescription(jobUrl, cookies = '') {
         }
 
         const $ = cheerio.load(response.body);
+
+        // Check if we got a Cloudflare challenge page
+        const title = $('title').text();
+        if (title.includes('Just a moment') || title.includes('Cloudflare')) {
+            log.debug(`Cloudflare challenge page detected: ${jobUrl}`);
+            return { blocked: true };
+        }
 
         // Remove source/apply buttons and unwanted elements
         $('p.source, [data-source], .source, .apply-button, .actions, .notclicky').remove();
@@ -209,6 +226,11 @@ async function fetchFullDescription(jobUrl, cookies = '') {
 
         return null;
     } catch (error) {
+        // Check if error is related to blocking
+        if (error.message && (error.message.includes('403') || error.message.includes('503'))) {
+            log.debug(`Cloudflare block detected (error): ${jobUrl}`);
+            return { blocked: true };
+        }
         log.debug(`Failed to fetch detail page ${jobUrl}: ${error.message}`);
         return null;
     }
@@ -216,19 +238,24 @@ async function fetchFullDescription(jobUrl, cookies = '') {
 
 /**
  * Enrich jobs with full descriptions from detail pages
+ * Uses session cookies from Camoufox to maintain Cloudflare bypass
  */
 async function enrichJobsWithFullDescriptions(jobs, page, maxConcurrency = 5) {
     if (jobs.length === 0) return jobs;
 
     log.info(`Fetching full descriptions for ${jobs.length} jobs...`);
 
-    // Get cookies from current page session for authentication
+    // Get cookies and user agent from current Camoufox session
     const cookies = await page.context().cookies();
     const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    const userAgent = await page.evaluate(() => navigator.userAgent);
+
+    log.debug(`Using ${cookies.length} cookies from Camoufox session for detail pages`);
 
     // Process jobs in batches to avoid overwhelming the server
     const enrichedJobs = [];
     const batchSize = maxConcurrency;
+    let blockedCount = 0;
 
     for (let i = 0; i < jobs.length; i += batchSize) {
         const batch = jobs.slice(i, i + batchSize);
@@ -236,13 +263,21 @@ async function enrichJobsWithFullDescriptions(jobs, page, maxConcurrency = 5) {
         const batchPromises = batch.map(async (job) => {
             if (!job.url) return job;
 
-            const fullDesc = await fetchFullDescription(job.url, cookieString);
+            const fullDesc = await fetchFullDescription(job.url, cookieString, userAgent);
 
-            if (fullDesc) {
+            // Check if we got blocked
+            if (fullDesc && fullDesc.blocked) {
+                blockedCount++;
+                log.warning(`Detail page blocked by Cloudflare: ${job.url}`);
+                // Return job with original snippet - don't fail the entire batch
+                return job;
+            }
+
+            if (fullDesc && fullDesc.descriptionHtml) {
                 return {
                     ...job,
-                    descriptionHtml: fullDesc.descriptionHtml || job.descriptionHtml,
-                    descriptionText: fullDesc.descriptionText || job.descriptionText,
+                    descriptionHtml: fullDesc.descriptionHtml,
+                    descriptionText: fullDesc.descriptionText,
                     jobType: fullDesc.jobType || job.jobType,
                 };
             }
@@ -259,6 +294,10 @@ async function enrichJobsWithFullDescriptions(jobs, page, maxConcurrency = 5) {
         if (i + batchSize < jobs.length) {
             await new Promise(resolve => setTimeout(resolve, 500));
         }
+    }
+
+    if (blockedCount > 0) {
+        log.warning(`${blockedCount} detail pages were blocked by Cloudflare - using snippets instead`);
     }
 
     return enrichedJobs;
@@ -746,20 +785,27 @@ try {
                 // Headless mode - must be boolean for Crawlee/Playwright
                 headless: true,
 
-                // Proxy configuration
+                // Proxy configuration - use residential proxy for trusted IP
                 proxy: proxyUrl,
 
                 // GeoIP spoofing - matches location/timezone/locale to proxy IP
+                // This is critical for Cloudflare bypass
                 geoip: true,
 
-                // OS fingerprint - use Windows for better compatibility
+                // OS fingerprint - Windows is most common and least suspicious
                 os: 'windows',
 
-                // Block WebRTC to prevent IP leaks
-                block_webrtc: true,
-
-                // Locale and language settings
+                // Locale and language settings - match proxy location
                 locale: 'en-US',
+
+                // Screen constraints for realistic viewport
+                // Avoid fixed sizes as they can be fingerprinted
+                screen: {
+                    minWidth: 1024,
+                    maxWidth: 1920,
+                    minHeight: 768,
+                    maxHeight: 1080,
+                },
             }),
         },
 
@@ -905,19 +951,39 @@ try {
                         return;
                     }
 
-                    // Look for next page - Careerjet specific
+                    // Look for next page - Careerjet specific selector
                     const nextPageUrl = await page.evaluate(() => {
-                        // Try multiple selectors for next page link
+                        // Careerjet uses: button.ves-control.ves-add.btn.btn-r.btn-primary-inverted.next
+                        // Try the exact selector first, then fallbacks
                         const nextButton =
+                            document.querySelector('button.next') ||
+                            document.querySelector('button.ves-control.next') ||
                             document.querySelector('a.page_next') ||
                             document.querySelector('a[rel="next"]') ||
                             document.querySelector('.pagination a.next') ||
-                            document.querySelector('.pager a.next') ||
-                            document.querySelector('[class*="pagination"] a[class*="next"]') ||
-                            document.querySelector('a[aria-label*="next" i]');
+                            document.querySelector('.pager a.next');
 
-                        if (nextButton && nextButton.href) {
-                            return nextButton.href;
+                        if (nextButton) {
+                            // For button elements, we need to get the onclick or data attribute
+                            if (nextButton.tagName === 'BUTTON') {
+                                // Check if button has onclick with URL
+                                const onclick = nextButton.getAttribute('onclick');
+                                if (onclick) {
+                                    const urlMatch = onclick.match(/location\.href\s*=\s*['"]([^'"]+)['"]/);
+                                    if (urlMatch) return urlMatch[1];
+                                }
+
+                                // Check for data-url or similar
+                                const dataUrl = nextButton.getAttribute('data-url') ||
+                                    nextButton.getAttribute('data-href');
+                                if (dataUrl) return dataUrl;
+
+                                // Look for parent link
+                                const parentLink = nextButton.closest('a');
+                                if (parentLink && parentLink.href) return parentLink.href;
+                            } else if (nextButton.href) {
+                                return nextButton.href;
+                            }
                         }
 
                         // Fallback: look for page numbers and find the next one
