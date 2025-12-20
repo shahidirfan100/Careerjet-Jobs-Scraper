@@ -1,0 +1,12 @@
+{
+  "searchQuery": "administrator",
+  "location": "USA",
+  "maxJobs": 20,
+  "newJobsOnly": true,
+  "jobType": "all",
+  "radius": "50",
+  "sortBy": "relevance",
+  "proxyConfiguration": {
+    "useApifyProxy": true
+  }
+}

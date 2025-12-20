@@ -93,24 +93,6 @@ Extract comprehensive job listings from Careerjet with advanced search filters a
 
 ---
 
-## 🔬 Scraping Technology & Architecture
-
-### Multi-Layer Data Extraction Strategy
-
-This scraper implements a **sophisticated multi-layer approach** optimized for speed and reliability:
-
-#### 1️⃣ **API-First Detection (Fastest)**
-- Monitors network requests to detect internal JSON APIs used by Careerjet
-- Automatically captures API endpoints when available
-- Extracts data directly from structured API responses
-- **Performance**: 10-50x faster than HTML parsing
-
-#### 2️⃣ **Intelligent HTML Parsing (Reliable)**
-- Multiple selector patterns for compatibility with page layout changes
-- Supports fallback selectors for flexible DOM structure matching
-- Extracts both HTML and plain text versions of descriptions
-- Data attribute support for structured data extraction
-- **Performance**: Consistent and reliable extraction
 
 #### 3️⃣ **Cloudflare Bypass (Guaranteed)**
 - Uses **Camoufox** - a stealthy fork of Firefox with built-in evasion

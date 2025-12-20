@@ -758,12 +758,18 @@ try {
     });
 
     // Validate input - either searchUrl OR (searchQuery AND location) must be provided
-    if (!input.searchUrl && (!input.searchQuery || !input.location)) {
-        throw new Error('Either searchUrl OR both searchQuery and location are required');
+    if (!input.searchUrl?.trim()) {
+        // If no searchUrl, both searchQuery and location are required
+        if (!input.searchQuery?.trim() || !input.location?.trim()) {
+            throw new Error('Invalid input: Either provide a "searchUrl" OR both "searchQuery" and "location" are required');
+        }
     }
 
-    // Set default values
-    const maxJobs = input.maxJobs || 100;
+    // Validate maxJobs range
+    const maxJobs = input.maxJobs ?? 20; // Default to 20 for QA compliance
+    if (maxJobs < 0 || maxJobs > 10000) {
+        throw new Error('maxJobs must be between 0 and 10000');
+    }
 
     // Build search URL
     const searchUrl = buildSearchUrl(input);
@@ -790,7 +796,7 @@ try {
     // Create Playwright crawler with Camoufox for Cloudflare bypass
     const crawler = new PlaywrightCrawler({
         proxyConfiguration,
-        maxRequestsPerCrawl: 50,
+        maxRequestsPerCrawl: 20, // Reduced for QA compliance - prevents runaway pagination
         maxConcurrency: 3, // Increased for faster scraping
         navigationTimeoutSecs: 30, // Reduced for speed
         requestHandlerTimeoutSecs: 120, // Reduced but enough for enrichment
@@ -1047,7 +1053,13 @@ try {
     // Save statistics
     await Actor.setValue('statistics', statistics);
 
-    log.info('Scraping completed', statistics);
+    log.info('✓ Scraping completed successfully!', statistics);
+
+    if (totalJobsScraped > 0) {
+        log.info(`Successfully scraped ${totalJobsScraped} jobs in ${duration} seconds`);
+    } else {
+        log.warning('No jobs were scraped. Please check your search parameters.');
+    }
 
 } catch (error) {
     log.exception(error, 'Actor failed with error');

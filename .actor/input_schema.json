@@ -13,7 +13,7 @@
         "searchQuery": {
             "title": "Search Query",
             "type": "string",
-            "description": "Job title or keywords to search for (e.g., 'administrator', 'software engineer', 'data analyst')",
+            "description": "Job title or keywords to search for (e.g., 'administrator', 'software engineer', 'data analyst'). Required if searchUrl is not provided.",
             "editor": "textfield",
             "default": "administrator",
             "prefill": "administrator"
@@ -21,7 +21,7 @@
         "location": {
             "title": "Location",
             "type": "string",
-            "description": "Location to search for jobs (e.g., 'USA', 'London, UK', 'New York')",
+            "description": "Location to search for jobs (e.g., 'USA', 'London, UK', 'New York'). Required if searchUrl is not provided.",
             "editor": "textfield",
             "default": "USA",
             "prefill": "USA"
@@ -29,8 +29,8 @@
         "maxJobs": {
             "title": "Maximum Jobs",
             "type": "integer",
-            "description": "Maximum number of job listings to scrape (0 = unlimited)",
-            "default": 100,
+            "description": "Maximum number of job listings to scrape (0 = unlimited). Default is 20 for optimal performance.",
+            "default": 20,
             "minimum": 0,
             "maximum": 10000
         },
@@ -45,16 +45,46 @@
             "type": "string",
             "description": "Filter by employment type",
             "default": "all",
-            "enum": ["all", "permanent", "contract", "temp", "parttime", "internship"],
-            "enumTitles": ["All Types", "Permanent", "Contract", "Temporary", "Part Time", "Internship"]
+            "enum": [
+                "all",
+                "permanent",
+                "contract",
+                "temp",
+                "parttime",
+                "internship"
+            ],
+            "enumTitles": [
+                "All Types",
+                "Permanent",
+                "Contract",
+                "Temporary",
+                "Part Time",
+                "Internship"
+            ]
         },
         "radius": {
             "title": "Search Radius",
             "type": "string",
             "description": "Distance from location to search (in km or miles)",
             "default": "50",
-            "enum": ["0", "10", "20", "30", "50", "100", "200"],
-            "enumTitles": ["Exact Location", "10 km/mi", "20 km/mi", "30 km/mi", "50 km/mi", "100 km/mi", "200 km/mi"]
+            "enum": [
+                "0",
+                "10",
+                "20",
+                "30",
+                "50",
+                "100",
+                "200"
+            ],
+            "enumTitles": [
+                "Exact Location",
+                "10 km/mi",
+                "20 km/mi",
+                "30 km/mi",
+                "50 km/mi",
+                "100 km/mi",
+                "200 km/mi"
+            ]
         },
         "salaryMin": {
             "title": "Minimum Salary",
@@ -67,8 +97,14 @@
             "type": "string",
             "description": "Sort order for job listings",
             "default": "relevance",
-            "enum": ["relevance", "date"],
-            "enumTitles": ["Relevance", "Date Posted"]
+            "enum": [
+                "relevance",
+                "date"
+            ],
+            "enumTitles": [
+                "Relevance",
+                "Date Posted"
+            ]
         },
         "proxyConfiguration": {
             "title": "Proxy Configuration",
@@ -80,5 +116,8 @@
             }
         }
     },
-    "required": ["searchQuery", "location"]
+    "required": [
+        "searchQuery",
+        "location"
+    ]
 }

@@ -13,8 +13,6 @@
                     "salary",
                     "jobType",
                     "postedDate",
-                    "description",
-                    "descriptionHtml",
                     "descriptionText",
                     "url"
                 ]
@@ -46,16 +44,8 @@
                         "label": "Posted Date",
                         "format": "text"
                     },
-                    "description": {
-                        "label": "Description",
-                        "format": "text"
-                    },
-                    "descriptionHtml": {
-                        "label": "Description HTML",
-                        "format": "text"
-                    },
                     "descriptionText": {
-                        "label": "Description Text",
+                        "label": "Description",
                         "format": "text"
                     },
                     "url": {
