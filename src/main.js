@@ -586,24 +586,42 @@ try {
     let extractionMethod = 'None';
     const startTime = Date.now();
 
+    // Get proxy URL for Camoufox
+    const proxyUrl = await proxyConfiguration.newUrl();
+
     // Create Playwright crawler with Camoufox for Cloudflare bypass
     const crawler = new PlaywrightCrawler({
         proxyConfiguration,
         maxRequestsPerCrawl: 50,
         maxConcurrency: 1,
-        navigationTimeoutSecs: 60,
+        navigationTimeoutSecs: 90,
         launchContext: {
             launcher: firefox,
             launchOptions: await camoufoxLaunchOptions({
-                headless: true,
-                proxy: await proxyConfiguration.newUrl(),
+                // Use 'virtual' headless mode on Linux (Xvfb) for better stealth
+                // This runs the browser with a real display context but no physical screen
+                headless: 'virtual',
+
+                // Proxy configuration
+                proxy: proxyUrl,
+
+                // GeoIP spoofing - matches location/timezone/locale to proxy IP
                 geoip: true,
+
+                // OS fingerprint - use Windows for better compatibility
                 os: 'windows',
-                screen: 'random',
-                addons: false,
-                // Additional Camoufox stealth options
-                timezone: 'UTC',
-                locale: 'en-US'
+
+                // Enable human-like cursor movements to evade detection
+                humanize: true,
+
+                // Disable Cross-Origin-Opener-Policy for Turnstile checkbox clicking
+                disable_coop: true,
+
+                // Block WebRTC to prevent IP leaks
+                block_webrtc: true,
+
+                // Locale and language settings
+                locale: 'en-US',
             }),
         },
 
@@ -612,26 +630,80 @@ try {
             log.info(`Processing page ${pagesProcessed}: ${request.url}`);
 
             try {
-                // Set realistic user agent and headers
+                // Set realistic headers
                 await page.setExtraHTTPHeaders({
                     'Accept-Language': 'en-US,en;q=0.9',
                     'Accept-Encoding': 'gzip, deflate, br',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Upgrade-Insecure-Requests': '1',
                 });
 
                 // Navigate to page
                 await page.goto(request.url, {
-                    waitUntil: 'networkidle',
+                    waitUntil: 'domcontentloaded',
                     timeout: 60000
                 });
 
+                // Wait for initial load
+                await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => { });
+
                 // Check for Cloudflare challenge and handle it
-                const title = await page.title();
-                if (title.includes('Just a moment') || title.includes('Cloudflare')) {
-                    log.warning('Cloudflare challenge detected, Camoufox bypass in progress...');
-                    // Camoufox handles Cloudflare automatically, just wait
-                    await page.waitForTimeout(5000);
-                    await page.waitForLoadState('networkidle', { timeout: 30000 });
+                let cloudflareDetected = false;
+                let retryCount = 0;
+                const maxRetries = 3;
+
+                while (retryCount < maxRetries) {
+                    const title = await page.title();
+                    const bodyText = await page.evaluate(() => document.body?.innerText?.substring(0, 500) || '');
+
+                    if (title.includes('Just a moment') ||
+                        title.includes('Cloudflare') ||
+                        bodyText.includes('unusual traffic') ||
+                        bodyText.includes('Checking your browser')) {
+
+                        cloudflareDetected = true;
+                        log.warning(`Cloudflare challenge detected (attempt ${retryCount + 1}/${maxRetries})`);
+
+                        // Wait for Cloudflare challenge to resolve
+                        await page.waitForTimeout(3000);
+
+                        // Try to click the Turnstile checkbox if present
+                        try {
+                            // Look for Turnstile iframe
+                            const turnstileFrame = page.frameLocator('iframe[src*="challenges.cloudflare.com"]');
+                            const checkbox = turnstileFrame.locator('input[type="checkbox"], .cf-turnstile-wrapper');
+
+                            if (await checkbox.count() > 0) {
+                                log.info('Found Turnstile checkbox, attempting click...');
+                                await checkbox.first().click({ timeout: 5000 });
+                                await page.waitForTimeout(3000);
+                            }
+                        } catch (clickErr) {
+                            log.debug('No clickable Turnstile element found');
+                        }
+
+                        // Wait for page to potentially resolve
+                        await page.waitForTimeout(5000);
+                        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => { });
+
+                        retryCount++;
+                    } else {
+                        // No Cloudflare detected, break out
+                        if (cloudflareDetected) {
+                            log.info('Cloudflare challenge bypassed successfully!');
+                        }
+                        break;
+                    }
+                }
+
+                if (retryCount >= maxRetries) {
+                    log.error('Failed to bypass Cloudflare after maximum retries');
+                    await saveDebugInfo(page);
+                    return;
                 }
 
                 // Add a small delay to ensure dynamic content loads
