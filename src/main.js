@@ -150,14 +150,16 @@ async function fetchFullDescription(jobUrl, cookies = '') {
 
         const $ = cheerio.load(response.body);
 
+        // Remove source/apply buttons and unwanted elements
+        $('p.source, [data-source], .source, .apply-button, .actions, .notclicky').remove();
+
         // Try multiple selectors for job description on detail page
         const descriptionSelectors = [
             '.job_description',
             '.job-description',
             '#job_description',
             '#job-description',
-            '[class*="description"]',
-            '.content',
+            'section.content',
             'article .desc',
             '.job-content',
             '.job_content',
@@ -171,6 +173,8 @@ async function fetchFullDescription(jobUrl, cookies = '') {
         for (const selector of descriptionSelectors) {
             const descEl = $(selector);
             if (descEl.length && descEl.text().trim().length > 100) {
+                // Remove source elements before extraction
+                descEl.find('p.source, [data-source], .source').remove();
                 descriptionHtml = descEl.html()?.trim() || '';
                 descriptionText = descEl.text().trim();
                 break;
@@ -181,12 +185,16 @@ async function fetchFullDescription(jobUrl, cookies = '') {
         if (!descriptionText) {
             const mainContent = $('main, article, .main-content, #main');
             if (mainContent.length) {
-                // Remove navigation, header, footer elements
-                mainContent.find('nav, header, footer, .sidebar, .related-jobs').remove();
+                // Remove navigation, header, footer, source elements
+                mainContent.find('nav, header, footer, .sidebar, .related-jobs, p.source, [data-source]').remove();
                 descriptionHtml = mainContent.html()?.trim() || '';
                 descriptionText = mainContent.text().trim();
             }
         }
+
+        // Clean description - remove source paragraph pattern
+        descriptionHtml = descriptionHtml.replace(/<p[^>]*class="source"[^>]*>.*?<\/p>/gi, '');
+        descriptionHtml = descriptionHtml.replace(/<p[^>]*data-source[^>]*>.*?<\/p>/gi, '');
 
         // Also try to extract additional job details from detail page
         const jobType = $('[class*="job-type"], [class*="employment"], .job_type').first().text().trim() || '';
@@ -435,13 +443,21 @@ function extractJobFromElement($, $el) {
         // Salary - from ul.salary
         const salary = $el.find('ul.salary').text().trim() || 'Not specified';
 
-        // Snippet from listing page (will be replaced with full description from detail page)
-        const descEl = $el.find('.desc');
+        // Snippet from listing page - remove source elements
+        const descEl = $el.find('.desc').clone();
+        descEl.find('p.source, [data-source], .source').remove();
         const snippet = descEl.text().trim() || '';
-        const snippetHtml = descEl.html()?.trim() || '';
+        let snippetHtml = descEl.html()?.trim() || '';
+        // Remove source tag from HTML
+        snippetHtml = snippetHtml.replace(/<p[^>]*class="source"[^>]*>.*?<\/p>/gi, '');
+        snippetHtml = snippetHtml.replace(/<p[^>]*data-source[^>]*>.*?<\/p>/gi, '');
 
-        // Posted date - from footer (often contains date info)
-        const postedDate = $el.find('footer').text().trim() || '';
+        // Posted date - extract only the date text from footer
+        // Footer contains: "13 hours ago Apply easily" - we only want the date part
+        const footerText = $el.find('footer').text().trim() || '';
+        // Extract date pattern (e.g., "13 hours ago", "2 days ago", "Just now")
+        const dateMatch = footerText.match(/^([\d\w\s]+(?:ago|now|today|yesterday))/i);
+        const postedDate = dateMatch ? dateMatch[1].trim() : footerText.split('Apply')[0].trim();
 
         // Only add if we have at least title or URL
         if (jobTitle || url) {
@@ -723,6 +739,7 @@ try {
         maxRequestsPerCrawl: 50,
         maxConcurrency: 1,
         navigationTimeoutSecs: 90,
+        requestHandlerTimeoutSecs: 180, // Increased for detail page enrichment
         launchContext: {
             launcher: firefox,
             launchOptions: await camoufoxLaunchOptions({
@@ -897,21 +914,42 @@ try {
                         return;
                     }
 
-                    // Look for next page
+                    // Look for next page - Careerjet specific
                     const nextPageUrl = await page.evaluate(() => {
+                        // Try multiple selectors for next page link
                         const nextButton =
+                            document.querySelector('a.page_next') ||
                             document.querySelector('a[rel="next"]') ||
                             document.querySelector('.pagination a.next') ||
+                            document.querySelector('.pager a.next') ||
                             document.querySelector('[class*="pagination"] a[class*="next"]') ||
-                            document.querySelector('a[aria-label*="next" i]') ||
-                            document.querySelector('a.page_next') ||
-                            document.querySelector('.pager a.next');
-                        return nextButton?.href;
+                            document.querySelector('a[aria-label*="next" i]');
+
+                        if (nextButton && nextButton.href) {
+                            return nextButton.href;
+                        }
+
+                        // Fallback: look for page numbers and find the next one
+                        const currentPage = document.querySelector('.pagination .current, .pager .current');
+                        if (currentPage) {
+                            const nextSibling = currentPage.nextElementSibling;
+                            if (nextSibling && nextSibling.tagName === 'A') {
+                                return nextSibling.href;
+                            }
+                        }
+
+                        return null;
                     });
 
                     if (nextPageUrl && totalJobsScraped < maxJobs) {
                         log.info(`Found next page: ${nextPageUrl}`);
-                        await crawler.addRequests([{ url: nextPageUrl }]);
+                        // Use uniqueKey to prevent duplicate requests
+                        await crawler.addRequests([{
+                            url: nextPageUrl,
+                            uniqueKey: nextPageUrl
+                        }]);
+                    } else if (!nextPageUrl) {
+                        log.info('No next page found - this may be the last page');
                     }
                 } else {
                     log.warning('No jobs found on this page');
