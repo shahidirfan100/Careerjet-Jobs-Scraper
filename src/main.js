@@ -755,15 +755,6 @@ try {
                 // OS fingerprint - use Windows for better compatibility
                 os: 'windows',
 
-                // Enable human-like cursor movements to evade detection
-                humanize: true,
-
-                // Disable Cross-Origin-Opener-Policy for Turnstile checkbox clicking
-                disable_coop: true,
-
-                // Suppress the disable_coop warning
-                i_know_what_im_doing: true,
-
                 // Block WebRTC to prevent IP leaks
                 block_webrtc: true,
 
