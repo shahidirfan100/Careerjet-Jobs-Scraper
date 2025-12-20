@@ -235,7 +235,7 @@ function buildSearchUrl(input) {
 }
 
 /**
- * Extract job data from the page using Cheerio HTML parsing (Fallback method)
+ * Extract job data from the page using Cheerio HTML parsing (Primary method with exact selectors)
  */
 async function extractJobDataViaHTML(page) {
     log.info('Extracting job data via HTML parsing with Cheerio');
@@ -245,21 +245,115 @@ async function extractJobDataViaHTML(page) {
         const $ = cheerio.load(html);
         const jobs = [];
 
-        // Careerjet-specific selectors - multiple strategies
+        // Exact Careerjet selector - article.job.clicky
+        const jobElements = $('article.job.clicky');
+
+        log.info(`Found ${jobElements.length} job cards with selector: article.job.clicky`);
+
+        if (jobElements.length === 0) {
+            // Fallback selectors if primary fails
+            const fallbackSelectors = ['article.job', '.job.clicky', 'article[class*="job"]'];
+            for (const selector of fallbackSelectors) {
+                const elements = $(selector);
+                if (elements.length > 0) {
+                    log.info(`Fallback: Found ${elements.length} elements with selector: ${selector}`);
+                    elements.each((_, element) => {
+                        const job = extractJobFromElement($, $(element));
+                        if (job) jobs.push(job);
+                    });
+                    break;
+                }
+            }
+        } else {
+            jobElements.each((_, element) => {
+                const job = extractJobFromElement($, $(element));
+                if (job) jobs.push(job);
+            });
+        }
+
+        log.info(`Extracted ${jobs.length} jobs via HTML parsing`);
+        return jobs;
+
+    } catch (error) {
+        log.warning(`HTML parsing failed: ${error.message}`);
+        return [];
+    }
+}
+
+/**
+ * Extract job data from a single job element using exact Careerjet selectors
+ */
+function extractJobFromElement($, $el) {
+    try {
+        // Job Title - from header > a
+        const headerEl = $el.find('header a').first();
+        const jobTitle = headerEl.text().trim() || '';
+
+        // Job URL - from header > a href
+        let url = headerEl.attr('href') || '';
+        if (url && !url.startsWith('http')) {
+            url = `https://www.careerjet.com${url}`;
+        }
+
+        // Company - from p.company (may contain a link)
+        const companyEl = $el.find('p.company');
+        let company = companyEl.find('a.notclicky').text().trim() || companyEl.text().trim() || '';
+
+        // Location - from ul.location
+        const location = $el.find('ul.location').text().trim() || '';
+
+        // Salary - from ul.salary
+        const salary = $el.find('ul.salary').text().trim() || 'Not specified';
+
+        // Description - from .desc
+        const descEl = $el.find('.desc');
+        const description = descEl.text().trim() || '';
+        const descriptionHtml = descEl.html()?.trim() || '';
+
+        // Posted date - from footer (often contains date info)
+        const postedDate = $el.find('footer').text().trim() || '';
+
+        // Only add if we have at least title or URL
+        if (jobTitle || url) {
+            return {
+                jobTitle: jobTitle || 'Unknown Title',
+                company,
+                location,
+                salary,
+                jobType: 'Not specified',
+                postedDate,
+                description,
+                descriptionHtml,
+                descriptionText: description,
+                url,
+                scrapedAt: new Date().toISOString()
+            };
+        }
+        return null;
+    } catch (err) {
+        log.debug(`Error extracting individual job: ${err.message}`);
+        return null;
+    }
+}
+
+/**
+ * Legacy fallback extraction for non-standard pages
+ */
+async function extractJobDataViaHTMLFallback(page) {
+    log.info('Trying fallback HTML extraction');
+
+    try {
+        const html = await page.content();
+        const $ = cheerio.load(html);
+        const jobs = [];
+
+        // Try generic selectors
         const jobSelectors = [
-            'article.job',
             '.job',
-            '.cj-job',
             'li[data-url]',
-            '.clicky',
-            'article[data-url]',
-            '.jobs-list article',
             '.job-card',
             '.job_result',
-            '.result',
-            '[class*="job"][class*="item"]',
-            '[class*="job"][class*="card"]',
-            '[class*="listing"]'
+            '[class*="job"][class*="item"]'
         ];
 
         let jobElements = $([]);
@@ -267,17 +361,9 @@ async function extractJobDataViaHTML(page) {
         for (const selector of jobSelectors) {
             const elements = $(selector);
             if (elements.length > 0) {
-                log.info(`Found ${elements.length} elements with selector: ${selector}`);
+                log.info(`Fallback found ${elements.length} elements with: ${selector}`);
                 jobElements = elements;
                 break;
-            }
-        }
-
-        if (jobElements.length === 0) {
-            // Try a broader search - any element with job-related data attributes
-            jobElements = $('[data-job], [data-job-id], [data-url*="job"]');
-            if (jobElements.length > 0) {
-                log.info(`Found ${jobElements.length} elements via data attributes`);
             }
         }
 
@@ -287,8 +373,7 @@ async function extractJobDataViaHTML(page) {
 
                 // Extract job title - try multiple patterns
                 let jobTitle = '';
-                const titleSelectors = ['h2 a', 'h3 a', '.title a', '.job-title a', 'a.job-title',
-                    '[class*="title"] a', 'header a', '.header a', 'a:first'];
+                const titleSelectors = ['h2 a', 'h3 a', '.title a', '.job-title a', 'header a', 'a:first'];
                 for (const sel of titleSelectors) {
                     const titleEl = $el.find(sel).first();
                     if (titleEl.length && titleEl.text().trim()) {
@@ -299,7 +384,7 @@ async function extractJobDataViaHTML(page) {
 
                 // Extract URL
                 let url = '';
-                const urlSelectors = ['h2 a', 'h3 a', '.title a', 'a.job-title', '[class*="title"] a', 'a:first'];
+                const urlSelectors = ['h2 a', 'h3 a', '.title a', 'header a', 'a:first'];
                 for (const sel of urlSelectors) {
                     const urlEl = $el.find(sel).first();
                     if (urlEl.length && urlEl.attr('href')) {
@@ -311,18 +396,9 @@ async function extractJobDataViaHTML(page) {
                     }
                 }
 
-                // Also check for data-url attribute
-                if (!url) {
-                    url = $el.attr('data-url') || '';
-                    if (url && !url.startsWith('http')) {
-                        url = `https://www.careerjet.com${url}`;
-                    }
-                }
-
                 // Extract company
                 let company = '';
-                const companySelectors = ['.company', '.employer', '[class*="company"]',
-                    '[class*="employer"]', 'p.company', '.job-company'];
+                const companySelectors = ['.company', 'p.company', '[class*="company"]'];
                 for (const sel of companySelectors) {
                     const compEl = $el.find(sel).first();
                     if (compEl.length && compEl.text().trim()) {
