@@ -781,6 +781,9 @@ try {
     let extractionMethod = 'None';
     const startTime = Date.now();
 
+    // Deduplication - track seen job URLs
+    const seenJobUrls = new Set();
+
     // Get proxy URL for Camoufox
     const proxyUrl = await proxyConfiguration.newUrl();
 
@@ -944,6 +947,25 @@ try {
                         ? jobs.slice(0, Math.max(0, maxJobs - totalJobsScraped))
                         : jobs;
 
+                    // Remove duplicates - filter out jobs we've already seen
+                    const uniqueJobs = jobsToSave.filter(job => {
+                        if (!job.url) return true; // Keep jobs without URL
+
+                        if (seenJobUrls.has(job.url)) {
+                            log.debug(`Skipping duplicate job: ${job.jobTitle} (${job.url})`);
+                            return false;
+                        }
+
+                        seenJobUrls.add(job.url);
+                        return true;
+                    });
+
+                    if (uniqueJobs.length < jobsToSave.length) {
+                        log.info(`Removed ${jobsToSave.length - uniqueJobs.length} duplicate jobs`);
+                    }
+
+                    jobsToSave = uniqueJobs;
+
                     // Enrich jobs with full descriptions from detail pages
                     if (jobsToSave.length > 0) {
                         log.info('Enriching jobs with full descriptions from detail pages...');
@@ -963,58 +985,31 @@ try {
                         return;
                     }
 
-                    // Look for next page - Careerjet uses button navigation
-                    // XPath: /html/body/main/div/div/div/p/button
-                    const nextPageClicked = await page.evaluate(() => {
-                        // Try multiple methods to find the next button
-                        let nextButton = null;
+                    // Look for next page - Careerjet uses p=2, p=3, etc.
+                    // Build next URL by incrementing page parameter
+                    const currentUrl = new URL(request.url);
+                    const currentPage = parseInt(currentUrl.searchParams.get('p') || '1');
 
-                        // Method 1: XPath (most reliable for Careerjet)
-                        const xpathResult = document.evaluate(
-                            '//main//p/button[contains(@class, "next")]',
-                            document,
-                            null,
-                            XPathResult.FIRST_ORDERED_NODE_TYPE,
-                            null
-                        );
-                        nextButton = xpathResult.singleNodeValue;
-
-                        // Method 2: CSS selectors as fallback
-                        if (!nextButton) {
-                            nextButton = document.querySelector('main p button.next') ||
-                                document.querySelector('button.next') ||
-                                document.querySelector('button.ves-control.next');
-                        }
-
-                        if (nextButton && !nextButton.disabled) {
-                            // Click the button to navigate
-                            nextButton.click();
-                            return true;
-                        }
-
-                        return false;
+                    // Check if next button exists and is not disabled
+                    const hasNextPage = await page.evaluate(() => {
+                        const nextButton = document.querySelector('button.next') ||
+                            document.querySelector('main p button.next');
+                        return nextButton && !nextButton.disabled;
                     });
 
-                    if (nextPageClicked && totalJobsScraped < maxJobs) {
-                        log.info('Clicked next page button, waiting for navigation...');
+                    if (hasNextPage && totalJobsScraped < maxJobs) {
+                        const nextPage = currentPage + 1;
+                        currentUrl.searchParams.set('p', nextPage.toString());
+                        const nextPageUrl = currentUrl.toString();
 
-                        // Wait for navigation to complete
-                        try {
-                            await page.waitForLoadState('networkidle', { timeout: 10000 });
+                        log.info(`Found next page: ${nextPageUrl} (page ${nextPage})`);
 
-                            // Get the new URL after navigation
-                            const newUrl = page.url();
-                            log.info(`Navigated to next page: ${newUrl}`);
-
-                            // Add the new URL to the queue
-                            await crawler.addRequests([{
-                                url: newUrl,
-                                uniqueKey: newUrl
-                            }]);
-                        } catch (navError) {
-                            log.warning(`Navigation after button click failed: ${navError.message}`);
-                        }
-                    } else if (!nextPageClicked) {
+                        // Add the new URL to the queue
+                        await crawler.addRequests([{
+                            url: nextPageUrl,
+                            uniqueKey: nextPageUrl
+                        }]);
+                    } else if (!hasNextPage) {
                         log.info('No next page button found - this may be the last page');
                     }
                 } else {
