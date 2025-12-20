@@ -104,7 +104,7 @@ function parseJobPosting(jobData) {
     }
 
     return {
-        jobTitle: jobData.title || '',
+        title: jobData.title || '',
         company: hiringOrg.name || '',
         location: location,
         salary: salary,
@@ -357,7 +357,7 @@ async function extractJobsViaAPI(page) {
                         log.info(`Found ${jobArray.length} jobs in embedded API data`);
                         for (const job of jobArray) {
                             capturedJobs.push({
-                                jobTitle: job.title || job.jobTitle || job.name || '',
+                                title: job.title || job.jobTitle || job.name || '',
                                 company: job.company || job.employer || job.hiringOrganization?.name || '',
                                 location: job.location || job.city || '',
                                 salary: job.salary || job.compensation || 'Not specified',
@@ -476,7 +476,7 @@ function extractJobFromElement($, $el) {
     try {
         // Job Title - from header > a
         const headerEl = $el.find('header a').first();
-        const jobTitle = headerEl.text().trim() || '';
+        const title = headerEl.text().trim() || '';
 
         // Job URL - from header > a href
         let url = headerEl.attr('href') || '';
@@ -511,9 +511,9 @@ function extractJobFromElement($, $el) {
         const postedDate = dateMatch ? dateMatch[1].trim() : footerText.split('Apply')[0].trim();
 
         // Only add if we have at least title or URL
-        if (jobTitle || url) {
+        if (title || url) {
             return {
-                jobTitle: jobTitle || 'Unknown Title',
+                title: title || 'Unknown Title',
                 company,
                 location,
                 salary,
@@ -569,12 +569,12 @@ async function extractJobDataViaHTMLFallback(page) {
                 const $el = $(element);
 
                 // Extract job title - try multiple patterns
-                let jobTitle = '';
+                let title = '';
                 const titleSelectors = ['h2 a', 'h3 a', '.title a', '.job-title a', 'header a', 'a:first'];
                 for (const sel of titleSelectors) {
                     const titleEl = $el.find(sel).first();
                     if (titleEl.length && titleEl.text().trim()) {
-                        jobTitle = titleEl.text().trim();
+                        title = titleEl.text().trim();
                         break;
                     }
                 }
@@ -651,9 +651,9 @@ async function extractJobDataViaHTMLFallback(page) {
                 }
 
                 // Only add if we have at least title or URL
-                if (jobTitle || url) {
+                if (title || url) {
                     jobs.push({
-                        jobTitle: jobTitle || 'Unknown Title',
+                        title: title || 'Unknown Title',
                         company,
                         location,
                         salary,
@@ -686,7 +686,7 @@ async function extractJobDataViaHTMLFallback(page) {
                     }
 
                     jobs.push({
-                        jobTitle: text,
+                        title: text,
                         company: '',
                         location: '',
                         salary: 'Not specified',
@@ -958,7 +958,7 @@ try {
                         if (!job.url) return true; // Keep jobs without URL
 
                         if (seenJobUrls.has(job.url)) {
-                            log.debug(`Skipping duplicate job: ${job.jobTitle} (${job.url})`);
+                            log.debug(`Skipping duplicate job: ${job.title} (${job.url})`);
                             return false;
                         }
 

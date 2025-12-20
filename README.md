@@ -250,7 +250,7 @@ Each job listing includes the following structured data:
 
 ```json
 {
-  "jobTitle": "Senior Data Analyst",
+  "title": "Senior Data Analyst",
   "company": "Tech Solutions Inc.",
   "location": "New York, NY",
   "salary": "$80,000 - $100,000 per year",
@@ -268,7 +268,7 @@ Each job listing includes the following structured data:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `jobTitle` | String | Job position title |
+| `title` | String | Job position title |
 | `company` | String | Hiring company name |
 | `location` | String | Job location (city, state, country) |
 | `salary` | String | Salary range or "Not specified" |

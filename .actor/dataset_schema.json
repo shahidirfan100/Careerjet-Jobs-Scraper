@@ -7,7 +7,7 @@
             "description": "Complete view of all scraped job listings",
             "transformation": {
                 "fields": [
-                    "jobTitle",
+                    "title",
                     "company",
                     "location",
                     "salary",
@@ -21,8 +21,8 @@
             "display": {
                 "component": "table",
                 "properties": {
-                    "jobTitle": {
-                        "label": "Job Title",
+                    "title": {
+                        "label": "Title",
                         "format": "text"
                     },
                     "company": {
