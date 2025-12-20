@@ -1,8 +1,9 @@
 import { Actor, log } from 'apify';
-import { PlaywrightCrawler } from '@crawlee/playwright';
+import { PlaywrightCrawler } from 'crawlee';
 import { launchOptions as camoufoxLaunchOptions } from 'camoufox-js';
 import { firefox } from 'playwright';
 import * as cheerio from 'cheerio';
+import { gotScraping } from 'got-scraping';
 
 // Initialize the Apify SDK
 await Actor.init();
@@ -109,7 +110,6 @@ function parseJobPosting(jobData) {
         salary: salary,
         jobType: jobData.employmentType || 'Not specified',
         postedDate: jobData.datePosted || '',
-        description: jobData.description ? stripHtml(jobData.description) : '',
         descriptionHtml: jobData.description || '',
         descriptionText: jobData.description ? stripHtml(jobData.description) : '',
         url: jobData.url || '',
@@ -123,6 +123,137 @@ function parseJobPosting(jobData) {
 function stripHtml(html) {
     if (!html) return '';
     return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Fetch complete job description from detail page using got-scraping
+ * This is faster than using Playwright for each detail page
+ */
+async function fetchFullDescription(jobUrl, cookies = '') {
+    try {
+        const response = await gotScraping({
+            url: jobUrl,
+            headers: {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Cookie': cookies,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
+            },
+            timeout: { request: 15000 },
+            retry: { limit: 2 },
+        });
+
+        if (response.statusCode !== 200) {
+            log.debug(`Detail page returned status ${response.statusCode}: ${jobUrl}`);
+            return null;
+        }
+
+        const $ = cheerio.load(response.body);
+
+        // Try multiple selectors for job description on detail page
+        const descriptionSelectors = [
+            '.job_description',
+            '.job-description',
+            '#job_description',
+            '#job-description',
+            '[class*="description"]',
+            '.content',
+            'article .desc',
+            '.job-content',
+            '.job_content',
+            'section.desc',
+            'div.desc',
+        ];
+
+        let descriptionHtml = '';
+        let descriptionText = '';
+
+        for (const selector of descriptionSelectors) {
+            const descEl = $(selector);
+            if (descEl.length && descEl.text().trim().length > 100) {
+                descriptionHtml = descEl.html()?.trim() || '';
+                descriptionText = descEl.text().trim();
+                break;
+            }
+        }
+
+        // If no description found with specific selectors, try the main content area
+        if (!descriptionText) {
+            const mainContent = $('main, article, .main-content, #main');
+            if (mainContent.length) {
+                // Remove navigation, header, footer elements
+                mainContent.find('nav, header, footer, .sidebar, .related-jobs').remove();
+                descriptionHtml = mainContent.html()?.trim() || '';
+                descriptionText = mainContent.text().trim();
+            }
+        }
+
+        // Also try to extract additional job details from detail page
+        const jobType = $('[class*="job-type"], [class*="employment"], .job_type').first().text().trim() || '';
+
+        if (descriptionText && descriptionText.length > 50) {
+            return {
+                descriptionHtml,
+                descriptionText,
+                jobType: jobType || null,
+            };
+        }
+
+        return null;
+    } catch (error) {
+        log.debug(`Failed to fetch detail page ${jobUrl}: ${error.message}`);
+        return null;
+    }
+}
+
+/**
+ * Enrich jobs with full descriptions from detail pages
+ */
+async function enrichJobsWithFullDescriptions(jobs, page, maxConcurrency = 5) {
+    if (jobs.length === 0) return jobs;
+
+    log.info(`Fetching full descriptions for ${jobs.length} jobs...`);
+
+    // Get cookies from current page session for authentication
+    const cookies = await page.context().cookies();
+    const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+    // Process jobs in batches to avoid overwhelming the server
+    const enrichedJobs = [];
+    const batchSize = maxConcurrency;
+
+    for (let i = 0; i < jobs.length; i += batchSize) {
+        const batch = jobs.slice(i, i + batchSize);
+
+        const batchPromises = batch.map(async (job) => {
+            if (!job.url) return job;
+
+            const fullDesc = await fetchFullDescription(job.url, cookieString);
+
+            if (fullDesc) {
+                return {
+                    ...job,
+                    descriptionHtml: fullDesc.descriptionHtml || job.descriptionHtml,
+                    descriptionText: fullDesc.descriptionText || job.descriptionText,
+                    jobType: fullDesc.jobType || job.jobType,
+                };
+            }
+
+            return job;
+        });
+
+        const batchResults = await Promise.all(batchPromises);
+        enrichedJobs.push(...batchResults);
+
+        log.info(`Enriched ${Math.min(i + batchSize, jobs.length)}/${jobs.length} jobs with full descriptions`);
+
+        // Small delay between batches to be respectful
+        if (i + batchSize < jobs.length) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+
+    return enrichedJobs;
 }
 
 /**
@@ -173,7 +304,6 @@ async function extractJobsViaAPI(page) {
                                 salary: job.salary || job.compensation || 'Not specified',
                                 jobType: job.type || job.employmentType || 'Not specified',
                                 postedDate: job.date || job.postedDate || job.datePosted || '',
-                                description: job.description || job.snippet || '',
                                 descriptionHtml: job.descriptionHtml || job.description || '',
                                 descriptionText: stripHtml(job.description || ''),
                                 url: job.url || job.link || '',
@@ -305,10 +435,10 @@ function extractJobFromElement($, $el) {
         // Salary - from ul.salary
         const salary = $el.find('ul.salary').text().trim() || 'Not specified';
 
-        // Description - from .desc
+        // Snippet from listing page (will be replaced with full description from detail page)
         const descEl = $el.find('.desc');
-        const description = descEl.text().trim() || '';
-        const descriptionHtml = descEl.html()?.trim() || '';
+        const snippet = descEl.text().trim() || '';
+        const snippetHtml = descEl.html()?.trim() || '';
 
         // Posted date - from footer (often contains date info)
         const postedDate = $el.find('footer').text().trim() || '';
@@ -322,9 +452,9 @@ function extractJobFromElement($, $el) {
                 salary,
                 jobType: 'Not specified',
                 postedDate,
-                description,
-                descriptionHtml,
-                descriptionText: description,
+                // These will be populated with full description from detail page
+                descriptionHtml: snippetHtml,
+                descriptionText: snippet,
                 url,
                 scrapedAt: new Date().toISOString()
             };
@@ -462,7 +592,6 @@ async function extractJobDataViaHTMLFallback(page) {
                         salary,
                         jobType: 'Not specified',
                         postedDate,
-                        description,
                         descriptionHtml: description,
                         descriptionText: description,
                         url,
@@ -496,7 +625,6 @@ async function extractJobDataViaHTMLFallback(page) {
                         salary: 'Not specified',
                         jobType: 'Not specified',
                         postedDate: '',
-                        description: '',
                         descriptionHtml: '',
                         descriptionText: '',
                         url: fullUrl,
@@ -744,9 +872,15 @@ try {
 
                 if (jobs.length > 0) {
                     // Filter jobs if we've reached the limit
-                    const jobsToSave = maxJobs > 0
+                    let jobsToSave = maxJobs > 0
                         ? jobs.slice(0, Math.max(0, maxJobs - totalJobsScraped))
                         : jobs;
+
+                    // Enrich jobs with full descriptions from detail pages
+                    if (jobsToSave.length > 0) {
+                        log.info('Enriching jobs with full descriptions from detail pages...');
+                        jobsToSave = await enrichJobsWithFullDescriptions(jobsToSave, page);
+                    }
 
                     // Save jobs to dataset
                     if (jobsToSave.length > 0) {
