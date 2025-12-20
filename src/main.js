@@ -252,7 +252,7 @@ async function fetchFullDescription(jobUrl, cookies = '', userAgent = '') {
  * Enrich jobs with full descriptions from detail pages
  * Uses session cookies from Camoufox to maintain Cloudflare bypass
  */
-async function enrichJobsWithFullDescriptions(jobs, page, maxConcurrency = 5) {
+async function enrichJobsWithFullDescriptions(jobs, page, maxConcurrency = 10) {
     if (jobs.length === 0) return jobs;
 
     log.info(`Fetching full descriptions for ${jobs.length} jobs...`);
@@ -302,9 +302,9 @@ async function enrichJobsWithFullDescriptions(jobs, page, maxConcurrency = 5) {
 
         log.info(`Enriched ${Math.min(i + batchSize, jobs.length)}/${jobs.length} jobs with full descriptions`);
 
-        // Small delay between batches to be respectful
+        // Small delay between batches - reduced for speed
         if (i + batchSize < jobs.length) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 200));
         }
     }
 
@@ -791,9 +791,9 @@ try {
     const crawler = new PlaywrightCrawler({
         proxyConfiguration,
         maxRequestsPerCrawl: 50,
-        maxConcurrency: 1,
-        navigationTimeoutSecs: 90,
-        requestHandlerTimeoutSecs: 180, // Increased for detail page enrichment
+        maxConcurrency: 3, // Increased for faster scraping
+        navigationTimeoutSecs: 30, // Reduced for speed
+        requestHandlerTimeoutSecs: 120, // Reduced but enough for enrichment
         launchContext: {
             launcher: firefox,
             launchOptions: await camoufoxLaunchOptions({
@@ -841,14 +841,14 @@ try {
                     'Upgrade-Insecure-Requests': '1',
                 });
 
-                // Navigate to page
+                // Navigate to page - faster loading
                 await page.goto(request.url, {
                     waitUntil: 'domcontentloaded',
-                    timeout: 60000
+                    timeout: 30000
                 });
 
-                // Wait for initial load
-                await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => { });
+                // Wait for initial load - reduced timeout for speed
+                await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => { });
 
                 // Check for Cloudflare challenge and handle it
                 let cloudflareDetected = false;
