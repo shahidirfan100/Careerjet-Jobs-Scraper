@@ -1,0 +1,84 @@
+{
+    "title": "Careerjet Jobs Scraper Input",
+    "type": "object",
+    "schemaVersion": 1,
+    "properties": {
+        "searchUrl": {
+            "title": "Search URL (Optional)",
+            "type": "string",
+            "description": "Direct Careerjet search URL to scrape from. If provided, other search parameters will be ignored. Example: https://www.careerjet.com/jobs?l=USA&nw=1&s=administrator",
+            "editor": "textfield",
+            "prefill": "https://www.careerjet.com/jobs?l=USA&nw=1&s=administrator"
+        },
+        "searchQuery": {
+            "title": "Search Query",
+            "type": "string",
+            "description": "Job title or keywords to search for (e.g., 'administrator', 'software engineer', 'data analyst')",
+            "editor": "textfield",
+            "default": "administrator",
+            "prefill": "administrator"
+        },
+        "location": {
+            "title": "Location",
+            "type": "string",
+            "description": "Location to search for jobs (e.g., 'USA', 'London, UK', 'New York')",
+            "editor": "textfield",
+            "default": "USA",
+            "prefill": "USA"
+        },
+        "maxJobs": {
+            "title": "Maximum Jobs",
+            "type": "integer",
+            "description": "Maximum number of job listings to scrape (0 = unlimited)",
+            "default": 100,
+            "minimum": 0,
+            "maximum": 10000
+        },
+        "newJobsOnly": {
+            "title": "New Jobs Only",
+            "type": "boolean",
+            "description": "Filter to show only recently posted jobs",
+            "default": true
+        },
+        "jobType": {
+            "title": "Job Type",
+            "type": "string",
+            "description": "Filter by employment type",
+            "default": "all",
+            "enum": ["all", "permanent", "contract", "temp", "parttime", "internship"],
+            "enumTitles": ["All Types", "Permanent", "Contract", "Temporary", "Part Time", "Internship"]
+        },
+        "radius": {
+            "title": "Search Radius",
+            "type": "string",
+            "description": "Distance from location to search (in km or miles)",
+            "default": "50",
+            "enum": ["0", "10", "20", "30", "50", "100", "200"],
+            "enumTitles": ["Exact Location", "10 km/mi", "20 km/mi", "30 km/mi", "50 km/mi", "100 km/mi", "200 km/mi"]
+        },
+        "salaryMin": {
+            "title": "Minimum Salary",
+            "type": "integer",
+            "description": "Minimum annual salary (optional filter)",
+            "minimum": 0
+        },
+        "sortBy": {
+            "title": "Sort By",
+            "type": "string",
+            "description": "Sort order for job listings",
+            "default": "relevance",
+            "enum": ["relevance", "date"],
+            "enumTitles": ["Relevance", "Date Posted"]
+        },
+        "proxyConfiguration": {
+            "title": "Proxy Configuration",
+            "type": "object",
+            "description": "Proxy settings for bypassing anti-bot protection. Recommended for reliable scraping.",
+            "editor": "proxy",
+            "default": {
+                "useApifyProxy": true
+            }
+        }
+    },
+    "required": ["searchQuery", "location"]
+}

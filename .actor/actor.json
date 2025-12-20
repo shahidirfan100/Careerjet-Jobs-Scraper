@@ -1,0 +1,17 @@
+{
+    "actorSpecification": 1,
+    "name": "careerjet-jobs-scraper",
+    "title": "Careerjet Jobs Scraper",
+    "description": "Extract job listings from Careerjet with advanced search filters. Get comprehensive job data including titles, companies, locations, salaries, descriptions, and direct application links. Perfect for job market analysis, recruitment automation, and employment research.",
+    "version": "1.0",
+    "meta": {
+        "templateId": "careerjet-jobs-scraper",
+        "generatedBy": "Claude Sonnet 4.5"
+    },
+    "input": "./input_schema.json",
+    "output": "./output_schema.json",
+    "storages": {
+        "dataset": "./dataset_schema.json"
+    },
+    "dockerfile": "../Dockerfile"
+}

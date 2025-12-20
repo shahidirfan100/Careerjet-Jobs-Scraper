@@ -1,0 +1,69 @@
+{
+    "actorSpecification": 1,
+    "fields": {},
+    "views": {
+        "overview": {
+            "title": "Job Listings Overview",
+            "description": "Complete view of all scraped job listings",
+            "transformation": {
+                "fields": [
+                    "jobTitle",
+                    "company",
+                    "location",
+                    "salary",
+                    "jobType",
+                    "postedDate",
+                    "description",
+                    "descriptionHtml",
+                    "descriptionText",
+                    "url"
+                ]
+            },
+            "display": {
+                "component": "table",
+                "properties": {
+                    "jobTitle": {
+                        "label": "Job Title",
+                        "format": "text"
+                    },
+                    "company": {
+                        "label": "Company",
+                        "format": "text"
+                    },
+                    "location": {
+                        "label": "Location",
+                        "format": "text"
+                    },
+                    "salary": {
+                        "label": "Salary",
+                        "format": "text"
+                    },
+                    "jobType": {
+                        "label": "Job Type",
+                        "format": "text"
+                    },
+                    "postedDate": {
+                        "label": "Posted Date",
+                        "format": "text"
+                    },
+                    "description": {
+                        "label": "Description",
+                        "format": "text"
+                    },
+                    "descriptionHtml": {
+                        "label": "Description HTML",
+                        "format": "text"
+                    },
+                    "descriptionText": {
+                        "label": "Description Text",
+                        "format": "text"
+                    },
+                    "url": {
+                        "label": "Job URL",
+                        "format": "link"
+                    }
+                }
+            }
+        }
+    }
+}
