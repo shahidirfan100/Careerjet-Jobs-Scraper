@@ -172,11 +172,11 @@ async function fetchFullDescription(jobUrl, cookies = '', userAgent = '') {
 
         // Try multiple selectors for job description on detail page
         const descriptionSelectors = [
+            'section.content',
             '.job_description',
             '.job-description',
             '#job_description',
             '#job-description',
-            'section.content',
             'article .desc',
             '.job-content',
             '.job_content',
@@ -188,10 +188,22 @@ async function fetchFullDescription(jobUrl, cookies = '', userAgent = '') {
         let descriptionText = '';
 
         for (const selector of descriptionSelectors) {
-            const descEl = $(selector);
+            const descEl = $(selector).clone();
             if (descEl.length && descEl.text().trim().length > 100) {
                 // Remove source elements before extraction
                 descEl.find('p.source, [data-source], .source').remove();
+
+                // Remove "Related Jobs" section - find and remove everything after headings containing "related"
+                descEl.find('h2, h3, h4').each((_, heading) => {
+                    const $heading = $(heading);
+                    const headingText = $heading.text().toLowerCase();
+                    if (headingText.includes('related') || headingText.includes('similar')) {
+                        // Remove this heading and all siblings after it
+                        $heading.nextAll().remove();
+                        $heading.remove();
+                    }
+                });
+
                 descriptionHtml = descEl.html()?.trim() || '';
                 descriptionText = descEl.text().trim();
                 break;
@@ -951,62 +963,59 @@ try {
                         return;
                     }
 
-                    // Look for next page - Careerjet specific selector
-                    const nextPageUrl = await page.evaluate(() => {
-                        // Careerjet uses: button.ves-control.ves-add.btn.btn-r.btn-primary-inverted.next
-                        // Try the exact selector first, then fallbacks
-                        const nextButton =
-                            document.querySelector('button.next') ||
-                            document.querySelector('button.ves-control.next') ||
-                            document.querySelector('a.page_next') ||
-                            document.querySelector('a[rel="next"]') ||
-                            document.querySelector('.pagination a.next') ||
-                            document.querySelector('.pager a.next');
+                    // Look for next page - Careerjet uses button navigation
+                    // XPath: /html/body/main/div/div/div/p/button
+                    const nextPageClicked = await page.evaluate(() => {
+                        // Try multiple methods to find the next button
+                        let nextButton = null;
 
-                        if (nextButton) {
-                            // For button elements, we need to get the onclick or data attribute
-                            if (nextButton.tagName === 'BUTTON') {
-                                // Check if button has onclick with URL
-                                const onclick = nextButton.getAttribute('onclick');
-                                if (onclick) {
-                                    const urlMatch = onclick.match(/location\.href\s*=\s*['"]([^'"]+)['"]/);
-                                    if (urlMatch) return urlMatch[1];
-                                }
+                        // Method 1: XPath (most reliable for Careerjet)
+                        const xpathResult = document.evaluate(
+                            '//main//p/button[contains(@class, "next")]',
+                            document,
+                            null,
+                            XPathResult.FIRST_ORDERED_NODE_TYPE,
+                            null
+                        );
+                        nextButton = xpathResult.singleNodeValue;
 
-                                // Check for data-url or similar
-                                const dataUrl = nextButton.getAttribute('data-url') ||
-                                    nextButton.getAttribute('data-href');
-                                if (dataUrl) return dataUrl;
-
-                                // Look for parent link
-                                const parentLink = nextButton.closest('a');
-                                if (parentLink && parentLink.href) return parentLink.href;
-                            } else if (nextButton.href) {
-                                return nextButton.href;
-                            }
+                        // Method 2: CSS selectors as fallback
+                        if (!nextButton) {
+                            nextButton = document.querySelector('main p button.next') ||
+                                document.querySelector('button.next') ||
+                                document.querySelector('button.ves-control.next');
                         }
 
-                        // Fallback: look for page numbers and find the next one
-                        const currentPage = document.querySelector('.pagination .current, .pager .current');
-                        if (currentPage) {
-                            const nextSibling = currentPage.nextElementSibling;
-                            if (nextSibling && nextSibling.tagName === 'A') {
-                                return nextSibling.href;
-                            }
+                        if (nextButton && !nextButton.disabled) {
+                            // Click the button to navigate
+                            nextButton.click();
+                            return true;
                         }
 
-                        return null;
+                        return false;
                     });
 
-                    if (nextPageUrl && totalJobsScraped < maxJobs) {
-                        log.info(`Found next page: ${nextPageUrl}`);
-                        // Use uniqueKey to prevent duplicate requests
-                        await crawler.addRequests([{
-                            url: nextPageUrl,
-                            uniqueKey: nextPageUrl
-                        }]);
-                    } else if (!nextPageUrl) {
-                        log.info('No next page found - this may be the last page');
+                    if (nextPageClicked && totalJobsScraped < maxJobs) {
+                        log.info('Clicked next page button, waiting for navigation...');
+
+                        // Wait for navigation to complete
+                        try {
+                            await page.waitForLoadState('networkidle', { timeout: 10000 });
+
+                            // Get the new URL after navigation
+                            const newUrl = page.url();
+                            log.info(`Navigated to next page: ${newUrl}`);
+
+                            // Add the new URL to the queue
+                            await crawler.addRequests([{
+                                url: newUrl,
+                                uniqueKey: newUrl
+                            }]);
+                        } catch (navError) {
+                            log.warning(`Navigation after button click failed: ${navError.message}`);
+                        }
+                    } else if (!nextPageClicked) {
+                        log.info('No next page button found - this may be the last page');
                     }
                 } else {
                     log.warning('No jobs found on this page');
